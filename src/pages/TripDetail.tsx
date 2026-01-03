@@ -61,9 +61,34 @@ export default function TripDetail() {
   const [activeTab, setActiveTab] = useState<'itinerary' | 'budget' | 'timeline'>('itinerary');
   const [showAddStop, setShowAddStop] = useState(false);
 
+  const [estimating, setEstimating] = useState(false);
+  const [estimatedTotalCost, setEstimatedTotalCost] = useState<number | null>(null);
+  const [estimateError, setEstimateError] = useState<string | null>(null);
+  const [estimatorForm, setEstimatorForm] = useState({
+    trip_days: 1,
+    source_country: '',
+    destination_country: '',
+    travel_type: 'mid' as 'budget' | 'mid' | 'luxury',
+    season: 'summer' as 'spring' | 'summer' | 'autumn' | 'winter',
+  });
+
   useEffect(() => {
     if (id) {
       loadTrip();
+    }
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    try {
+      const raw = localStorage.getItem(`globet:budgetEstimate:${id}`);
+      if (!raw) return;
+      const value = Number(raw);
+      if (Number.isFinite(value)) {
+        setEstimatedTotalCost(value);
+      }
+    } catch {
+      // ignore storage errors
     }
   }, [id]);
 
@@ -111,10 +136,50 @@ export default function TripDetail() {
 
         setStops(stopsWithActivities);
       }
+
+      await loadLatestEstimate();
     }
 
     setLoading(false);
   };
+
+  const loadLatestEstimate = async () => {
+    const { data } = await supabase
+      .from('trip_budget_estimates')
+      .select('estimated_total_cost, trip_days, source_country, destination_country, travel_type, season')
+      .eq('trip_id', id!)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    const latest = data?.[0];
+    if (latest) {
+      setEstimatedTotalCost(latest.estimated_total_cost ?? null);
+      setEstimatorForm((prev) => ({
+        ...prev,
+        trip_days: latest.trip_days || prev.trip_days,
+        source_country: latest.source_country || prev.source_country,
+        destination_country: latest.destination_country || prev.destination_country,
+        travel_type: (latest.travel_type as any) || prev.travel_type,
+        season: (latest.season as any) || prev.season,
+      }));
+    }
+  };
+
+  useEffect(() => {
+    if (!trip) return;
+
+    const start = trip.start_date ? new Date(trip.start_date) : null;
+    const end = trip.end_date ? new Date(trip.end_date) : null;
+    const days = start && end ? Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000) + 1) : 1;
+
+    const destination = stops[0]?.city.country ?? '';
+
+    setEstimatorForm((prev) => ({
+      ...prev,
+      trip_days: prev.trip_days || days,
+      destination_country: prev.destination_country || destination,
+    }));
+  }, [trip, stops]);
 
   const togglePublic = async () => {
     if (trip) {
@@ -131,6 +196,73 @@ export default function TripDetail() {
       });
     });
     return total;
+  };
+
+  const stopCost = (stop: TripStop) =>
+    stop.activities.reduce((sum, a) => sum + (a.actual_cost || a.activity.estimated_cost), 0);
+
+  const stopStayDays = (stop: TripStop) => {
+    if (!stop.arrival_date || !stop.departure_date) return null;
+    const arrival = new Date(stop.arrival_date).getTime();
+    const departure = new Date(stop.departure_date).getTime();
+    return Math.max(1, Math.ceil((departure - arrival) / 86400000) + 1);
+  };
+
+  const stopTravelGap = (current: TripStop, prev?: TripStop | undefined) => {
+    if (!prev || !current.arrival_date || !prev.departure_date) return null;
+    const arrival = new Date(current.arrival_date).getTime();
+    const prevDepart = new Date(prev.departure_date).getTime();
+    const gap = Math.ceil((arrival - prevDepart) / 86400000);
+    return gap > 0 ? gap : 0;
+  };
+
+  const estimateBudget = async () => {
+    setEstimating(true);
+    setEstimateError(null);
+
+    try {
+      const apiBaseUrl = (import.meta as any).env?.VITE_BUDGET_API_URL || 'http://localhost:8000';
+      const res = await fetch(`${apiBaseUrl}/predict`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(estimatorForm),
+      });
+
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        const msg = json?.detail || json?.error || `Request failed (${res.status})`;
+        throw new Error(msg);
+      }
+
+      const value = Number(json?.estimated_total_cost);
+      if (!Number.isFinite(value)) {
+        throw new Error('Invalid prediction response');
+      }
+
+      setEstimatedTotalCost(value);
+      if (id) {
+        try {
+          localStorage.setItem(`globet:budgetEstimate:${id}`, String(value));
+        } catch {
+          // ignore storage errors
+        }
+
+        // Persist estimate for this trip
+        await supabase.from('trip_budget_estimates').insert({
+          trip_id: id,
+          estimated_total_cost: value,
+          trip_days: estimatorForm.trip_days,
+          source_country: estimatorForm.source_country,
+          destination_country: estimatorForm.destination_country,
+          travel_type: estimatorForm.travel_type,
+          season: estimatorForm.season,
+        });
+      }
+    } catch (e: any) {
+      setEstimateError(e?.message || 'Failed to estimate budget');
+    } finally {
+      setEstimating(false);
+    }
   };
 
   const deleteStop = async (stopId: string) => {
@@ -195,7 +327,7 @@ export default function TripDetail() {
                 </div>
                 <div className="flex items-center text-gray-600">
                   <DollarSign className="w-4 h-4 mr-2" />
-                  ${calculateTotalBudget().toFixed(2)}
+                  ${(estimatedTotalCost ?? calculateTotalBudget()).toFixed(2)}
                 </div>
               </div>
             </div>
@@ -367,10 +499,104 @@ export default function TripDetail() {
             <h2 className="text-2xl font-bold text-gray-900 mb-6">Budget Overview</h2>
             <div className="mb-8">
               <div className="text-center p-8 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl">
-                <p className="text-gray-600 mb-2">Total Estimated Cost</p>
-                <p className="text-5xl font-bold text-blue-600">${calculateTotalBudget().toFixed(2)}</p>
+                <p className="text-gray-600 mb-2">
+                  {estimatedTotalCost !== null ? 'Estimated Total Cost (ML)' : 'Total Estimated Cost'}
+                </p>
+                <p className="text-5xl font-bold text-blue-600">
+                  ${(estimatedTotalCost ?? calculateTotalBudget()).toFixed(2)}
+                </p>
               </div>
             </div>
+
+            <div className="mb-8 p-6 bg-gray-50 rounded-xl border border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Estimate total trip cost (ML)</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Trip days</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={estimatorForm.trip_days}
+                    onChange={(e) =>
+                      setEstimatorForm((p) => ({ ...p, trip_days: Math.max(1, Number(e.target.value || 1)) }))
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Travel type</label>
+                  <select
+                    value={estimatorForm.travel_type}
+                    onChange={(e) =>
+                      setEstimatorForm((p) => ({ ...p, travel_type: e.target.value as any }))
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  >
+                    <option value="budget">Budget</option>
+                    <option value="mid">Mid</option>
+                    <option value="luxury">Luxury</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Source country</label>
+                  <input
+                    type="text"
+                    value={estimatorForm.source_country}
+                    onChange={(e) => setEstimatorForm((p) => ({ ...p, source_country: e.target.value }))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                    placeholder="India"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Destination country</label>
+                  <input
+                    type="text"
+                    value={estimatorForm.destination_country}
+                    onChange={(e) => setEstimatorForm((p) => ({ ...p, destination_country: e.target.value }))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                    placeholder="Korea"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Season</label>
+                  <select
+                    value={estimatorForm.season}
+                    onChange={(e) => setEstimatorForm((p) => ({ ...p, season: e.target.value as any }))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  >
+                    <option value="spring">Spring</option>
+                    <option value="summer">Summer</option>
+                    <option value="autumn">Autumn</option>
+                    <option value="winter">Winter</option>
+                  </select>
+                </div>
+
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    onClick={estimateBudget}
+                    disabled={estimating}
+                    className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50"
+                  >
+                    {estimating ? 'Estimating...' : 'Estimate'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                {estimateError && <p className="text-sm text-red-600">{estimateError}</p>}
+                {estimatedTotalCost !== null && !estimateError && (
+                  <p className="text-sm text-gray-700">
+                    Estimated total cost: <span className="font-semibold">${estimatedTotalCost.toFixed(2)}</span>
+                  </p>
+                )}
+              </div>
+            </div>
+
             <div className="space-y-4">
               {stops.map((stop) => {
                 const stopTotal = stop.activities.reduce(
@@ -394,37 +620,90 @@ export default function TripDetail() {
         {activeTab === 'timeline' && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
             <h2 className="text-2xl font-bold text-gray-900 mb-6">Timeline View</h2>
-            <div className="space-y-6">
-              {stops.map((stop, index) => (
-                <div key={stop.id} className="flex">
-                  <div className="flex flex-col items-center mr-6">
-                    <div className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">
-                      {index + 1}
-                    </div>
-                    {index < stops.length - 1 && <div className="w-0.5 h-full bg-blue-200 mt-2"></div>}
-                  </div>
-                  <div className="flex-1 pb-8">
-                    <h3 className="text-xl font-bold text-gray-900 mb-2">{stop.city.name}</h3>
-                    {stop.arrival_date && stop.departure_date && (
-                      <p className="text-sm text-gray-600 mb-4">
-                        {new Date(stop.arrival_date).toLocaleDateString()} -{' '}
-                        {new Date(stop.departure_date).toLocaleDateString()}
-                      </p>
-                    )}
-                    {stop.activities.map((activity) => (
-                      <div key={activity.id} className="mb-2 p-3 bg-gray-50 rounded-lg">
-                        <p className="font-medium text-gray-900">{activity.activity.name}</p>
-                        {activity.scheduled_date && (
-                          <p className="text-xs text-gray-600">
-                            {new Date(activity.scheduled_date).toLocaleDateString()}
-                          </p>
+            {stops.length === 0 ? (
+              <div className="text-center text-gray-600">No stops to show yet.</div>
+            ) : (
+              <div className="space-y-6">
+                {stops.map((stop, index) => {
+                  const cost = stopCost(stop);
+                  const stayDays = stopStayDays(stop);
+                  const gapDays = stopTravelGap(stop, stops[index - 1]);
+
+                  return (
+                    <div key={stop.id} className="flex">
+                      <div className="flex flex-col items-center mr-6">
+                        <div className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">
+                          {index + 1}
+                        </div>
+                        {index < stops.length - 1 && <div className="w-0.5 h-full bg-blue-200 mt-2"></div>}
+                      </div>
+                      <div className="flex-1 pb-8">
+                        <div className="flex flex-col md:flex-row md:items-center md:justify-between md:space-x-4">
+                          <div>
+                            <h3 className="text-xl font-bold text-gray-900">{stop.city.name}</h3>
+                            <p className="text-sm text-gray-600">{stop.city.country}</p>
+                          </div>
+                          <div className="flex flex-wrap gap-3 mt-3 md:mt-0 text-sm text-gray-700">
+                            <span className="flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 rounded-full">
+                              <Calendar className="w-4 h-4" />
+                              {stop.arrival_date && stop.departure_date
+                                ? `${new Date(stop.arrival_date).toLocaleDateString()} → ${new Date(stop.departure_date).toLocaleDateString()}`
+                                : 'Dates TBC'}
+                            </span>
+                            <span className="flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full">
+                              <DollarSign className="w-4 h-4" />
+                              ${cost.toFixed(2)}
+                            </span>
+                            {stayDays && (
+                              <span className="flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full">
+                                <Clock className="w-4 h-4" />
+                                Stay {stayDays} {stayDays === 1 ? 'day' : 'days'}
+                              </span>
+                            )}
+                            {gapDays !== null && gapDays > 0 && (
+                              <span className="flex items-center gap-2 px-3 py-1 bg-orange-50 text-orange-700 rounded-full">
+                                <MapPin className="w-4 h-4" />
+                                Travel gap {gapDays} {gapDays === 1 ? 'day' : 'days'}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="mt-4 relative">
+                          <div className="absolute left-0 right-0 top-1/2 h-1 bg-gray-100 rounded-full"></div>
+                          <div className="relative flex items-center space-x-4">
+                            <div className="w-3 h-3 bg-blue-600 rounded-full shadow"></div>
+                            <div className="flex-1 h-3 bg-gradient-to-r from-blue-100 via-blue-200 to-blue-100 rounded-full"></div>
+                            <div className="w-3 h-3 bg-blue-600 rounded-full shadow"></div>
+                          </div>
+                        </div>
+
+                        {stop.activities.length > 0 && (
+                          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {stop.activities.map((activity) => (
+                              <div key={activity.id} className="p-3 bg-gray-50 rounded-lg border border-gray-100">
+                                <p className="font-medium text-gray-900">{activity.activity.name}</p>
+                                <p className="text-xs text-gray-600">
+                                  {activity.activity.category} • {activity.activity.estimated_duration_hours}h
+                                </p>
+                                <p className="text-xs text-gray-700 mt-1">
+                                  Cost: ${(activity.actual_cost || activity.activity.estimated_cost).toFixed(2)}
+                                </p>
+                                {activity.scheduled_date && (
+                                  <p className="text-xs text-gray-500 mt-1">
+                                    {new Date(activity.scheduled_date).toLocaleDateString()}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
                         )}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>

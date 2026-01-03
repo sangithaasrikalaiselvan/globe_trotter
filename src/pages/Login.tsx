@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Plane } from 'lucide-react';
+import { Plane, MapPin, Calendar, ShieldCheck } from 'lucide-react';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -28,16 +28,53 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-cyan-50 flex items-center justify-center p-4">
-      <div className="max-w-md w-full">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4 shadow-lg">
+      <div className="max-w-6xl w-full grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
+        <div className="space-y-6">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl shadow-lg">
             <Plane className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome Back</h1>
-          <p className="text-gray-600">Sign in to continue your travel adventures</p>
+          <div>
+            <p className="uppercase tracking-wide text-blue-600 font-semibold text-xs mb-2">GlobeTrotter</p>
+            <h1 className="text-4xl font-bold text-gray-900 leading-tight mb-3">Design smarter trips, automatically</h1>
+            <p className="text-lg text-gray-700 max-w-xl">
+              Build multi-stop adventures with live budgets, AI cost estimates, and shareable itineraries—all in one place.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="p-4 bg-white rounded-xl shadow-sm border border-gray-200">
+              <div className="flex items-center gap-2 text-blue-700 font-semibold text-sm mb-1">
+                <MapPin className="w-4 h-4" /> Plan every stop
+              </div>
+              <p className="text-sm text-gray-700">Organize routes, dates, and activities for each city in minutes.</p>
+            </div>
+            <div className="p-4 bg-white rounded-xl shadow-sm border border-gray-200">
+              <div className="flex items-center gap-2 text-emerald-700 font-semibold text-sm mb-1">
+                <ShieldCheck className="w-4 h-4" /> Smart budgets
+              </div>
+              <p className="text-sm text-gray-700">Estimate total costs with the built-in ML model and track spending.</p>
+            </div>
+            <div className="p-4 bg-white rounded-xl shadow-sm border border-gray-200">
+              <div className="flex items-center gap-2 text-indigo-700 font-semibold text-sm mb-1">
+                <Calendar className="w-4 h-4" /> Visual timelines
+              </div>
+              <p className="text-sm text-gray-700">See your journey as an easy-to-read timeline across stops.</p>
+            </div>
+            <div className="p-4 bg-white rounded-xl shadow-sm border border-gray-200">
+              <div className="flex items-center gap-2 text-gray-800 font-semibold text-sm mb-1">
+                <Plane className="w-4 h-4" /> Share & collaborate
+              </div>
+              <p className="text-sm text-gray-700">Make trips public or private and share them securely with friends.</p>
+            </div>
+          </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-xl p-8">
+        <div className="bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
+          <div className="text-center mb-6">
+            <h2 className="text-2xl font-bold text-gray-900 mb-1">Welcome back</h2>
+            <p className="text-gray-600 text-sm">Sign in to continue your travel adventures.</p>
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-6">
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
