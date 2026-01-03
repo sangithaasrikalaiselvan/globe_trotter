@@ -11,6 +11,7 @@ import AddStop from './pages/AddStop';
 import AddActivity from './pages/AddActivity';
 import Profile from './pages/Profile';
 import SharedTrip from './pages/SharedTrip';
+import Budget from './pages/Budget';
 
 function App() {
   return (
@@ -20,6 +21,7 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/shared/:id" element={<SharedTrip />} />
+
           <Route
             path="/dashboard"
             element={
@@ -28,6 +30,7 @@ function App() {
               </ProtectedRoute>
             }
           />
+
           <Route
             path="/trips"
             element={
@@ -36,6 +39,7 @@ function App() {
               </ProtectedRoute>
             }
           />
+
           <Route
             path="/trips/new"
             element={
@@ -44,6 +48,7 @@ function App() {
               </ProtectedRoute>
             }
           />
+
           <Route
             path="/trips/:id"
             element={
@@ -52,6 +57,17 @@ function App() {
               </ProtectedRoute>
             }
           />
+
+          {/* ⭐ ADD THIS BUDGET ROUTE ⭐ */}
+          <Route
+            path="/trips/:id/budget"
+            element={
+              <ProtectedRoute>
+                <Budget />
+              </ProtectedRoute>
+            }
+          />
+
           <Route
             path="/trips/:id/add-stop"
             element={
@@ -60,6 +76,7 @@ function App() {
               </ProtectedRoute>
             }
           />
+
           <Route
             path="/trips/:id/stops/:stopId/add-activity"
             element={
@@ -68,6 +85,7 @@ function App() {
               </ProtectedRoute>
             }
           />
+
           <Route
             path="/profile"
             element={
@@ -76,6 +94,7 @@ function App() {
               </ProtectedRoute>
             }
           />
+
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </AuthProvider>
