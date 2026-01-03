@@ -39,11 +39,12 @@ export default function Profile() {
 
     const { error } = await supabase
       .from('profiles')
-      .upsert({
-        id: user!.id,
-        ...formData,
-        updated_at: new Date().toISOString(),
-      });
+       .upsert({
+      id: user!.id,
+      full_name: formData.full_name,
+      avatar_url: formData.avatar_url,
+      language: formData.language_preference   // <-- MATCH DB COLUMN
+    });
 
     if (error) {
       alert('Error updating profile. Please try again.');
